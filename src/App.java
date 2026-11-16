@@ -1,94 +1,175 @@
-// import javax.swing.*;
-// import java.awt.event.ActionEvent;
-
-// import engine.GameManager;
-// import view.GamePanel;
-
-// public class App {
-//     public static void main(String[] args) throws Exception {
-//         GameManager manager = new GameManager();
-//         GamePanel panel = new GamePanel(manager);
-
-//         JFrame window = new JFrame("Sea Sweep!");
-//         window.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-//         window.setResizable(false);
-//         window.add(panel);
-//         window.pack();
-//         // window.setLocationRelativeTo(null);
-//         window.setVisible(true);
-
-//         panel.getInputMap(GamePanel.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("LEFT"), "moveLeft");
-//         panel.getActionMap().put("moveLeft",new AbstractAction() {
-//             @Override 
-//             public void actionPerformed(ActionEvent e){
-//                 manager.executePlayerAction("left");
-//             }
-//         });
-
-//         panel.getInputMap(GamePanel.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("RIGHT"), "moveRight");
-//         panel.getActionMap().put("moveRight",new AbstractAction() {
-//             @Override 
-//             public void actionPerformed(ActionEvent e){
-//                 manager.executePlayerAction("right");
-//             }
-//         });
-
-//         Timer gameLoopTimer = new Timer(16, e->{
-//             manager.processFrameUpdate(0.016);
-//             panel.repaint();
-//         });
-
-//         gameLoopTimer.start();
-//     }
-// }
-import java.awt.event.ActionEvent;
-import java.awt.event.KeyEvent;
-
-import javax.swing.AbstractAction;
-import javax.swing.JFrame;
-import javax.swing.JComponent;
-import javax.swing.KeyStroke;
-import javax.swing.Timer;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.application.Application;
+import javafx.scene.Group;
+import javafx.scene.Scene;
+import javafx.scene.input.KeyCode;
+import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import engine.GameManager;
 import view.GamePanel;
 
-public class App {
-    public static void main(String[] args) throws Exception {
+public class App extends Application {
+
+    @Override
+    public void start(Stage stage) {
         GameManager manager = new GameManager();
         GamePanel panel = new GamePanel(manager);
 
-        JFrame window = new JFrame("Sea Sweep!");
-        window.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        window.setResizable(false);
-        window.add(panel);
-        window.pack();
-        window.setLocationRelativeTo(null);
+        Scene scene = new Scene(new Group(panel));
 
-        panel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-            .put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "moveLeft");
-        panel.getActionMap().put("moveLeft", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                manager.executePlayerAction("left");
+        // keyboard: what a key does depends on the current screen
+        scene.setOnKeyPressed(e -> {
+            KeyCode code = e.getCode();
+
+            switch (manager.getState()) {
+                case MENU:
+                    if (code == KeyCode.ENTER || code == KeyCode.L) {
+                        manager.startLevels();
+                    } else if (code == KeyCode.U) {
+                        manager.startUnlimited();
+                    } else if (code == KeyCode.T) {
+                        manager.startTutorial();
+                    }
+                    break;
+
+                case TUTORIAL:
+                    if (code == KeyCode.ESCAPE) {
+                        manager.returnToMenu();
+                    } else if (code == KeyCode.ENTER) {
+                        manager.tutorialConfirm();
+                    }
+                    break;
+
+                case PLAYING:
+                    handlePlayingKey(manager, code);
+                    break;
             }
         });
 
-        panel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-            .put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "moveRight");
-        panel.getActionMap().put("moveRight", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                manager.executePlayerAction("right");
+        // typed characters for the username (handles shift/caps correctly)
+        scene.setOnKeyTyped(e -> {
+            String typed = e.getCharacter();
+            if (!typed.isEmpty() && !Character.isISOControl(typed.charAt(0))) {
+                manager.typeNameCharacter(typed.charAt(0));
             }
         });
 
-        Timer gameLoopTimer = new Timer(16, e -> {
+        // mouse: drag and drop (and double-click) on the sea
+        panel.setOnMousePressed(e -> manager.mousePressed(e.getX(), e.getY(), e.getClickCount()));
+        panel.setOnMouseDragged(e -> manager.mouseDragged(e.getX(), e.getY()));
+        panel.setOnMouseReleased(e -> manager.mouseReleased(e.getX(), e.getY()));
+
+        // mouse: the buttons on each screen
+        panel.setOnMouseClicked(e -> handleClick(manager, panel, e.getX(), e.getY()));
+
+        stage.setTitle("Sea Sweep!");
+        stage.setResizable(false);
+        stage.setScene(scene);
+        stage.show();
+
+        panel.render(); // first frame
+
+        // 16 ms fixed tick: update first, then render
+        Timeline gameLoop = new Timeline(new KeyFrame(Duration.millis(16), e -> {
             manager.processFrameUpdate(0.016);
-            panel.repaint();
-        });
-        gameLoopTimer.start();
+            panel.render();
+        }));
+        gameLoop.setCycleCount(Animation.INDEFINITE);
+        gameLoop.play();
+    }
 
-        window.setVisible(true);
+    private static void handlePlayingKey(GameManager manager, KeyCode code) {
+        if (manager.isEnteringName()) {
+            if (code == KeyCode.ENTER) {
+                manager.submitName();
+            } else if (code == KeyCode.BACK_SPACE) {
+                manager.deleteNameCharacter();
+            }
+            return;
+        }
+
+        if (code == KeyCode.ESCAPE) {
+            manager.returnToMenu();
+            return;
+        }
+
+        switch (manager.getPhase()) {
+            case INTRO:
+                if (code == KeyCode.ENTER) {
+                    manager.confirmIntro();
+                }
+                break;
+            case LEVEL_COMPLETE:
+                if (code == KeyCode.ENTER) {
+                    manager.nextLevel();
+                }
+                break;
+            case GAME_OVER:
+                if (code == KeyCode.R) {
+                    manager.restart();
+                } else if (code == KeyCode.M) {
+                    manager.returnToMenu();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private static void handleClick(GameManager manager, GamePanel panel, double x, double y) {
+        switch (manager.getState()) {
+            case MENU:
+                if (panel.isLevelsButtonHit(x, y)) {
+                    manager.startLevels();
+                } else if (panel.isUnlimitedButtonHit(x, y)) {
+                    manager.startUnlimited();
+                } else if (panel.isTutorialButtonHit(x, y)) {
+                    manager.startTutorial();
+                }
+                break;
+
+            case TUTORIAL:
+                if (panel.isBackButtonHit(x, y)) {
+                    manager.returnToMenu();
+                } else if (panel.isTutorialNextHit(x, y)) {
+                    manager.tutorialConfirm();
+                }
+                break;
+
+            case PLAYING:
+                switch (manager.getPhase()) {
+                    case INTRO:
+                        if (panel.isIntroStartHit(x, y)) {
+                            manager.confirmIntro();
+                        }
+                        break;
+                    case LEVEL_COMPLETE:
+                        if (panel.isCompleteNextHit(x, y)) {
+                            manager.nextLevel();
+                        } else if (panel.isCompleteMenuHit(x, y)) {
+                            manager.returnToMenu();
+                        }
+                        break;
+                    case GAME_OVER:
+                        if (manager.canRestart()) {
+                            if (panel.isRestartButtonHit(x, y)) {
+                                manager.restart();
+                            } else if (panel.isGameOverMenuButtonHit(x, y)) {
+                                manager.returnToMenu();
+                            }
+                        }
+                        break;
+                    default:
+                        break;
+                }
+                break;
+        }
+    }
+
+    public static void main(String[] args) {
+        launch(args);
     }
 }

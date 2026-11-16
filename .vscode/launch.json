@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Sea Sweep",
+      "request": "launch",
+      "mainClass": "App",
+      "javaExec": "C:/Program Files/BellSoft/LibericaJDK-17-Full/bin/java.exe",
+      "vmArgs": "--add-modules javafx.controls"
+    }
+  ]
+}
