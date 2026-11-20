@@ -1,5 +1,5 @@
 package engine;
 
 public enum GameState {
-    MENU, TUTORIAL, PLAYING
+    MENU, LEVEL_SELECT, TUTORIAL, PLAYING
 }

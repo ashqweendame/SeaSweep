@@ -27,11 +27,17 @@ public class App extends Application {
             switch (manager.getState()) {
                 case MENU:
                     if (code == KeyCode.ENTER || code == KeyCode.L) {
-                        manager.startLevels();
+                        manager.openLevelSelect();
                     } else if (code == KeyCode.U) {
                         manager.startUnlimited();
                     } else if (code == KeyCode.T) {
                         manager.startTutorial();
+                    }
+                    break;
+
+                case LEVEL_SELECT:
+                    if (code == KeyCode.ESCAPE) {
+                        manager.returnToMenu();
                     }
                     break;
 
@@ -68,6 +74,14 @@ public class App extends Application {
         stage.setTitle("Sea Sweep!");
         stage.setResizable(false);
         stage.setScene(scene);
+
+        // switching to another window stops the game instead of letting the sea carry on
+        stage.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+            if (!isFocused) {
+                manager.pause();
+            }
+        });
+
         stage.show();
 
         panel.render(); // first frame
@@ -92,7 +106,20 @@ public class App extends Application {
         }
 
         if (code == KeyCode.ESCAPE) {
-            manager.returnToMenu();
+            switch (manager.getPhase()) {
+                case RUNNING:
+                    manager.pause();
+                    break;
+                case PAUSED:
+                    manager.resume();
+                    break;
+                case GAME_OVER:
+                    manager.returnToMenu();
+                    break;
+                default:
+                    manager.exitRun();   // intro / level-complete card: nothing at stake, just leave
+                    break;
+            }
             return;
         }
 
@@ -105,6 +132,13 @@ public class App extends Application {
             case LEVEL_COMPLETE:
                 if (code == KeyCode.ENTER) {
                     manager.nextLevel();
+                }
+                break;
+            case PAUSED:
+                if (code == KeyCode.R) {
+                    manager.restart();
+                } else if (code == KeyCode.M) {
+                    manager.returnToMenu();
                 }
                 break;
             case GAME_OVER:
@@ -123,11 +157,22 @@ public class App extends Application {
         switch (manager.getState()) {
             case MENU:
                 if (panel.isLevelsButtonHit(x, y)) {
-                    manager.startLevels();
+                    manager.openLevelSelect();
                 } else if (panel.isUnlimitedButtonHit(x, y)) {
                     manager.startUnlimited();
                 } else if (panel.isTutorialButtonHit(x, y)) {
                     manager.startTutorial();
+                }
+                break;
+
+            case LEVEL_SELECT:
+                if (panel.isBackButtonHit(x, y)) {
+                    manager.returnToMenu();
+                } else {
+                    int level = panel.levelAt(x, y);
+                    if (level > 0) {
+                        manager.startLevel(level);   // ignored by the manager if the level is locked
+                    }
                 }
                 break;
 
@@ -141,6 +186,20 @@ public class App extends Application {
 
             case PLAYING:
                 switch (manager.getPhase()) {
+                    case RUNNING:
+                        if (panel.isPauseHit(x, y)) {
+                            manager.pause();
+                        }
+                        break;
+                    case PAUSED:
+                        if (panel.isPauseResumeHit(x, y)) {
+                            manager.resume();
+                        } else if (panel.isPauseRestartHit(x, y)) {
+                            manager.restart();
+                        } else if (panel.isPauseMenuHit(x, y)) {
+                            manager.returnToMenu();
+                        }
+                        break;
                     case INTRO:
                         if (panel.isIntroStartHit(x, y)) {
                             manager.confirmIntro();
@@ -150,7 +209,7 @@ public class App extends Application {
                         if (panel.isCompleteNextHit(x, y)) {
                             manager.nextLevel();
                         } else if (panel.isCompleteMenuHit(x, y)) {
-                            manager.returnToMenu();
+                            manager.openLevelSelect();
                         }
                         break;
                     case GAME_OVER:

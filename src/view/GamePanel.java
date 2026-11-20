@@ -19,6 +19,7 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.ArcType;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
@@ -50,6 +51,20 @@ public class GamePanel extends Canvas {
     private final int[] BTN_BACK = {10, 10, 70, 32};
     private final int[] BTN_TUTORIAL_NEXT = {centerX - 75, 180, 150, 30};
 
+    // pause: a small button in the sky while playing, and the three buttons on the pause card
+    private final int[] BTN_PAUSE = {centerX - 45, 10, 90, 32};
+    private final int[] BTN_PAUSE_RESUME = {centerX - 100, 275, 200, 44};
+    private final int[] BTN_PAUSE_RESTART = {centerX - 100, 331, 200, 44};
+    private final int[] BTN_PAUSE_MENU = {centerX - 100, 387, 200, 44};
+
+    // level-select grid: levels 1-10 in 5 columns x 2 rows, the special level as one wide cell below
+    private final int GRID_COLS = 5;
+    private final int CELL_W = 130;
+    private final int CELL_H = 110;
+    private final int CELL_GAP = 24;
+    private final int GRID_X = (WIDTH - (GRID_COLS * CELL_W + (GRID_COLS - 1) * CELL_GAP)) / 2;
+    private final int GRID_Y = 190;
+
     private final Color COLOR_SKY = Color.web("#BFF0F7");
     private final Color COLOR_SEA = Color.web("#09c3db");
     private final Color COLOR_PLASTIC = Color.web("#2F5FDE");
@@ -65,6 +80,8 @@ public class GamePanel extends Canvas {
     private final Color COLOR_SHADE = Color.rgb(0, 0, 0, 70 / 255.0);
     private final Color COLOR_GOOD = Color.web("#7CFC9A");
     private final Color COLOR_BAD = Color.web("#FF8A8A");
+    private final Color COLOR_LOCKED = Color.web("#6B7C86");
+    private final Color COLOR_LOCKED_TEXT = Color.web("#C9D3D9");
 
     private final Font fontBOLD = Font.font("Arial", FontWeight.BOLD, 16);
 
@@ -83,10 +100,14 @@ public class GamePanel extends Canvas {
         // Canvas keeps its state between frames, so reset what we rely on
         gc.setFont(fontBOLD);
         gc.setImageSmoothing(true);
+        gc.setLineWidth(1);
 
         switch (gameManager.getState()) {
             case MENU:
                 drawMenu(gc);
+                break;
+            case LEVEL_SELECT:
+                drawLevelSelect(gc);
                 break;
             case TUTORIAL:
                 drawTutorial(gc);
@@ -122,6 +143,116 @@ public class GamePanel extends Canvas {
 
         gc.setFill(Color.WHITE);
         drawCentered(gc, "L: levels     U: unlimited     T: tutorial", Font.font("Arial", FontWeight.NORMAL, 14), centerX, 540);
+    }
+
+    // ---- level select: a grid of locked / open / cleared levels ----
+
+    private void drawLevelSelect(GraphicsContext gc) {
+        drawBackground(gc);
+
+        Font titleFont = bold(40);
+        gc.setFill(COLOR_SHADE);
+        drawCentered(gc, "SELECT LEVEL", titleFont, centerX + 3, 103);
+        gc.setFill(COLOR_SCORE);
+        drawCentered(gc, "SELECT LEVEL", titleFont, centerX, 100);
+        drawCentered(gc, "Clear a level to unlock the next one.", bold(16), centerX, 135);
+
+        for (int level = 1; level <= LevelData.TOTAL_LEVELS; level++) {
+            drawLevelCell(gc, level);
+        }
+
+        drawButton(gc, BTN_BACK, Color.WHITE, "BACK", bold(14), COLOR_MISS, false);
+    }
+
+    private void drawLevelCell(GraphicsContext gc, int level) {
+        int[] b = levelCell(level);
+        boolean unlocked = gameManager.isUnlocked(level);
+        boolean cleared = gameManager.isCleared(level);
+        boolean special = level == LevelData.SPECIAL_LEVEL;
+        boolean next = unlocked && !cleared;   // the level you are up to
+
+        gc.setFill(COLOR_SHADE);
+        gc.fillRoundRect(b[0] + 4, b[1] + 6, b[2], b[3], 16, 16);
+
+        Color fill;
+        if (!unlocked) {
+            fill = COLOR_LOCKED;
+        } else if (special) {
+            fill = COLOR_MISS;
+        } else if (cleared) {
+            fill = COLOR_GLASS;
+        } else {
+            fill = COLOR_PLASTIC;
+        }
+        gc.setFill(fill);
+        gc.fillRoundRect(b[0], b[1], b[2], b[3], 16, 16);
+
+        if (next) {
+            gc.setStroke(Color.YELLOW);
+            gc.setLineWidth(4);
+            gc.strokeRoundRect(b[0], b[1], b[2], b[3], 16, 16);
+            gc.setLineWidth(1);
+        }
+
+        double cx = b[0] + b[2] / 2.0;
+        double cy = b[1] + b[3] / 2.0;
+        gc.setFill(unlocked ? Color.WHITE : COLOR_LOCKED_TEXT);
+        if (special) {
+            drawCentered(gc, "SPECIAL LEVEL", bold(24), cx, cy + 6);
+        } else {
+            drawCentered(gc, String.valueOf(level), bold(40), cx, cy + 10);
+        }
+
+        String status = !unlocked ? "LOCKED" : (cleared ? "CLEARED" : "PLAY");
+        drawCentered(gc, status, bold(12), cx, b[1] + b[3] - 12);
+
+        double badgeX = b[0] + b[2] - 20;
+        double badgeY = b[1] + 22;
+        if (!unlocked) {
+            drawPadlock(gc, badgeX, badgeY);
+        } else if (cleared) {
+            drawCheck(gc, badgeX, badgeY);
+        }
+    }
+
+    private void drawCheck(GraphicsContext gc, double cx, double cy) {
+        gc.setFill(Color.WHITE);
+        gc.fillOval(cx - 11, cy - 11, 22, 22);
+        gc.setStroke(COLOR_GLASS);
+        gc.setLineWidth(3);
+        gc.strokeLine(cx - 5, cy, cx - 1, cy + 4);
+        gc.strokeLine(cx - 1, cy + 4, cx + 6, cy - 4);
+        gc.setLineWidth(1);
+    }
+
+    private void drawPadlock(GraphicsContext gc, double cx, double cy) {
+        gc.setStroke(COLOR_LOCKED_TEXT);
+        gc.setLineWidth(3);
+        gc.strokeArc(cx - 6, cy - 14, 12, 20, 0, 180, ArcType.OPEN);   // shackle
+        gc.setLineWidth(1);
+        gc.setFill(COLOR_LOCKED_TEXT);
+        gc.fillRoundRect(cx - 10, cy - 4, 20, 16, 4, 4);               // body
+    }
+
+    private int[] levelCell(int level) {
+        if (level == LevelData.SPECIAL_LEVEL) {
+            int y = GRID_Y + 2 * (CELL_H + CELL_GAP);
+            return new int[]{centerX - 150, y, 300, 90};
+        }
+        int index = level - 1;
+        int col = index % GRID_COLS;
+        int row = index / GRID_COLS;
+        return new int[]{GRID_X + col * (CELL_W + CELL_GAP), GRID_Y + row * (CELL_H + CELL_GAP), CELL_W, CELL_H};
+    }
+
+    // which level's cell is at this point (0 = none)
+    public int levelAt(double x, double y) {
+        for (int level = 1; level <= LevelData.TOTAL_LEVELS; level++) {
+            if (hit(levelCell(level), x, y)) {
+                return level;
+            }
+        }
+        return 0;
     }
 
     private void drawTutorial(GraphicsContext gc) {
@@ -171,9 +302,10 @@ public class GamePanel extends Canvas {
         Playfield field = gameManager.getPlayfield();
         GamePhase phase = gameManager.getPhase();
         boolean over = phase == GamePhase.GAME_OVER;
+        boolean paused = phase == GamePhase.PAUSED;
 
         drawBackground(gc);
-        drawPlayfield(gc, field, !over);   // on game over the bins stay, the trash is gone
+        drawPlayfield(gc, field, !over && !paused);   // game over / pause: the bins stay, the trash is hidden
 
         if (over) {
             drawGameOverScreen(gc);        // dims the scene first, so the HUD below stays bright
@@ -184,10 +316,13 @@ public class GamePanel extends Canvas {
 
         if (phase == GamePhase.RUNNING) {
             drawMessage(gc);
+            drawButton(gc, BTN_PAUSE, Color.WHITE, "PAUSE", bold(14), COLOR_SCORE, false);
         } else if (phase == GamePhase.INTRO) {
             drawLevelIntro(gc);
         } else if (phase == GamePhase.LEVEL_COMPLETE) {
             drawLevelComplete(gc);
+        } else if (paused) {
+            drawPausedCard(gc);
         }
     }
 
@@ -366,7 +501,27 @@ public class GamePanel extends Canvas {
         }
 
         drawButton(gc, BTN_COMPLETE_NEXT, COLOR_GLASS, "NEXT LEVEL", bold(18), Color.WHITE, false);
-        drawButton(gc, BTN_COMPLETE_MENU, Color.WHITE, "MENU", bold(18), COLOR_PLASTIC, false);
+        drawButton(gc, BTN_COMPLETE_MENU, Color.WHITE, "LEVELS", bold(18), COLOR_PLASTIC, false);
+    }
+
+    // the card shown by ESC / the PAUSE button
+    private void drawPausedCard(GraphicsContext gc) {
+        gc.setFill(Color.rgb(0, 0, 0, 110 / 255.0));
+        gc.fillRect(0, 0, width, height);
+
+        gc.setFill(COLOR_SCORE);
+        gc.fillRoundRect(centerX - 160, 205, 320, 255, 24, 24);
+
+        gc.setFill(Color.YELLOW);
+        drawCentered(gc, "PAUSED", bold(34), centerX, 252);
+
+        drawButton(gc, BTN_PAUSE_RESUME, COLOR_GLASS, "RESUME", bold(20), Color.WHITE, false);
+        drawButton(gc, BTN_PAUSE_RESTART, COLOR_PAPER, "RESTART", bold(20), COLOR_SCORE, false);
+        drawButton(gc, BTN_PAUSE_MENU, Color.WHITE, "MENU", bold(20), COLOR_PLASTIC, false);
+
+        gc.setFill(Color.WHITE);
+        drawCentered(gc, "ESC: resume     R: restart     M: menu",
+                Font.font("Arial", FontWeight.NORMAL, 13), centerX, 450);
     }
 
     // ================= game over =================
@@ -388,7 +543,8 @@ public class GamePanel extends Canvas {
 
         String where = gameManager.getMode() == GameMode.LEVELS ? "Level " : "Stage ";
         gc.setFill(Color.WHITE);
-        drawCentered(gc, "Score: " + gameManager.getScore() + "   " + where + gameManager.getLevel(),
+        int whereNumber = gameManager.getMode() == GameMode.LEVELS ? gameManager.getLevel() : gameManager.getStage();
+        drawCentered(gc, "Score: " + gameManager.getScore() + "   " + where + whereNumber,
                 Font.font("Arial", FontWeight.NORMAL, 20), centerX, 280);
 
         if (gameManager.isEnteringName()) {
@@ -468,6 +624,10 @@ public class GamePanel extends Canvas {
     public boolean isRestartButtonHit(double x, double y) {return hit(BTN_RESTART, x, y);}
     public boolean isGameOverMenuButtonHit(double x, double y) {return hit(BTN_GAMEOVER_MENU, x, y);}
     public boolean isBackButtonHit(double x, double y) {return hit(BTN_BACK, x, y);}
+    public boolean isPauseHit(double x, double y) {return hit(BTN_PAUSE, x, y);}
+    public boolean isPauseResumeHit(double x, double y) {return hit(BTN_PAUSE_RESUME, x, y);}
+    public boolean isPauseRestartHit(double x, double y) {return hit(BTN_PAUSE_RESTART, x, y);}
+    public boolean isPauseMenuHit(double x, double y) {return hit(BTN_PAUSE_MENU, x, y);}
 
     // the tutorial's NEXT / PLAY LEVELS button only exists on some steps
     public boolean isTutorialNextHit(double x, double y) {

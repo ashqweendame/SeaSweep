@@ -1,6 +1,8 @@
 package engine;
 
 import io.HighScoreManager;
+import io.ProgressManager;
+import model.BinType;
 import model.ScoreEntry;
 import model.Trash;
 import model.TrashKind;
@@ -13,9 +15,18 @@ import java.util.List;
 public class GameManager {
     private final int START_LIVES = 3;
     private final int POINTS_PER_PIECE = 10;
-    private final int PIECES_PER_STAGE = 10;          // unlimited: correct sorts before the next stage
-    private final double UNLIMITED_SPEED_RAMP = 0.01; // unlimited: extra speed per correct sort
-    private final double UNLIMITED_MAX_SPEED = 4.0;
+    // ---- unlimited mode: its own tuning, independent of the level table ----
+    // Only the trash introduction order (pool, bins, "new" pieces per stage) is shared with LevelData.
+    private final int PIECES_PER_STAGE = 10;                 // correct sorts before the next stage
+    private final double UNLIMITED_START_SPEED = 1.0;        // float speed at the very start
+    private final double UNLIMITED_SPEED_RAMP = 0.01;        // extra speed per correct sort
+    private final double UNLIMITED_MAX_SPEED = 3.0;
+    private final int UNLIMITED_START_ON_SCREEN = 2;         // most pieces at once on stage 1
+    private final int UNLIMITED_MAX_ON_SCREEN = 4;
+    private final int UNLIMITED_STAGES_PER_EXTRA_PIECE = 3;  // one more piece allowed every N stages
+    private final int UNLIMITED_SPAWN_DELAY_START = 95;      // ticks between pieces on stage 1
+    private final int UNLIMITED_SPAWN_DELAY_STEP = 5;        // shorter by this much per stage
+    private final int UNLIMITED_SPAWN_DELAY_MIN = 35;
     private final int MESSAGE_TICKS = 150;
     private final int MAX_NAME_LENGTH = 10;
     private final int TOP_SCORE_COUNT = 3;
@@ -29,8 +40,11 @@ public class GameManager {
     private final TutorialManager tutorial = new TutorialManager();
     private final HighScoreManager levelScores = new HighScoreManager("highscore-levels.txt");
     private final HighScoreManager unlimitedScores = new HighScoreManager("highscore-unlimited.txt");
+    private final ProgressManager progress = new ProgressManager("progress.txt", LevelData.TOTAL_LEVELS);
 
-    private int level = 1;                 // levels mode: the level; unlimited: the current stage
+    private int cleared;                   // how many levels have been cleared (level N is open when N <= cleared + 1)
+    private int level = 1;                 // levels mode only: the level being played
+    private int stage = 1;                 // unlimited mode only: the current stage
     private LevelData levelData = LevelData.get(1);
     private int score = 0;
     private int lives = START_LIVES;
@@ -47,12 +61,25 @@ public class GameManager {
     private boolean messageGood = true;
     private int messageTicks = 0;
 
+    public GameManager(){
+        cleared = progress.loadCleared();
+    }
+
     // ================= screens =================
 
-    public void startLevels(){
+    // the grid of levels (from the menu, the tutorial, or the level-complete card)
+    public void openLevelSelect(){
+        if(state == GameState.PLAYING && enteringName) return;
+        state = GameState.LEVEL_SELECT;
+    }
+
+    // starts one specific level from the grid; locked levels are refused here, not just greyed out on screen
+    public void startLevel(int number){
+        if(!isUnlocked(number)) return;
+
         mode = GameMode.LEVELS;
         score = 0;
-        level = 1;
+        level = number;
         state = GameState.PLAYING;
         beginLevel();
     }
@@ -60,11 +87,10 @@ public class GameManager {
     public void startUnlimited(){
         mode = GameMode.UNLIMITED;
         score = 0;
-        level = 1;
+        stage = 1;
         correctCount = 0;
         state = GameState.PLAYING;
 
-        levelData = LevelData.get(level);
         resetRound();
         phase = GamePhase.RUNNING;
         announceNewTrash();
@@ -75,20 +101,47 @@ public class GameManager {
         state = GameState.TUTORIAL;
     }
 
-    // from the tutorial any time; from a run unless the name prompt is open
+    // from the tutorial, the grid, or a run (unless the name prompt is open)
     public void returnToMenu(){
-        if(state == GameState.TUTORIAL || (state == GameState.PLAYING && !enteringName)){
+        if(state == GameState.TUTORIAL || state == GameState.LEVEL_SELECT
+                || (state == GameState.PLAYING && !enteringName)){
             state = GameState.MENU;
         }
+    }
+
+    // leaving a run quietly (ESC on a card): back to the grid in levels mode, the menu in unlimited
+    public void exitRun(){
+        if(state != GameState.PLAYING || enteringName) return;
+        state = (mode == GameMode.LEVELS) ? GameState.LEVEL_SELECT : GameState.MENU;
     }
 
     public void tutorialConfirm(){
         if(state != GameState.TUTORIAL) return;
 
         if(tutorial.isFinished()){
-            startLevels();
+            openLevelSelect();
         }else{
             tutorial.confirm();
+        }
+    }
+
+    // ================= progress =================
+
+    public boolean isUnlocked(int number){
+        return number >= 1 && number <= Math.min(LevelData.TOTAL_LEVELS, cleared + 1);
+    }
+
+    public boolean isCleared(int number){
+        return number >= 1 && number <= cleared;
+    }
+
+    public int getClearedCount() {return cleared;}
+
+    // only ever goes up, so replaying an old level can't lock anything again
+    private void recordCleared(int number){
+        if(number > cleared){
+            cleared = Math.min(LevelData.TOTAL_LEVELS, number);
+            progress.saveCleared(cleared);
         }
     }
 
@@ -111,7 +164,7 @@ public class GameManager {
         clearMessage();
 
         playfield.clear();
-        playfield.setBins(levelData.getBins());
+        playfield.setBins(currentBins());
     }
 
     public void confirmIntro(){
@@ -127,6 +180,23 @@ public class GameManager {
         }
     }
 
+    // ================= pause =================
+
+    public void pause(){
+        if(state == GameState.PLAYING && phase == GamePhase.RUNNING){
+            playfield.cancelDrag();   // don't leave a piece glued to the mouse
+            phase = GamePhase.PAUSED;
+        }
+    }
+
+    public void resume(){
+        if(state == GameState.PLAYING && phase == GamePhase.PAUSED){
+            phase = GamePhase.RUNNING;
+        }
+    }
+
+    public boolean isPaused() {return phase == GamePhase.PAUSED;}
+
     // ================= one tick =================
 
     public void processFrameUpdate(double deltaTime){
@@ -134,6 +204,7 @@ public class GameManager {
             tutorial.update();
             return;
         }
+        // INTRO, PAUSED, LEVEL_COMPLETE and GAME_OVER all stop here, so a pause freezes everything
         if(state != GameState.PLAYING || phase != GamePhase.RUNNING) return;
 
         if(messageTicks > 0){
@@ -160,30 +231,65 @@ public class GameManager {
             }
             return;
         }
-        if(playfield.size() >= levelData.getMaxOnScreen()) return;
+        if(playfield.size() >= maxOnScreen()) return;
 
-        TrashKind kind = spawner.pickKind(levelData.getPool(), levelData.getNewKinds());
+        TrashKind kind = spawner.pickKind(currentPool(), currentFeatured());
         Trash trash = spawner.createTrash(kind, GameConfig.WINDOW_WIDTH, currentSpeed(),
                 GameConfig.BAND_TOP, GameConfig.BAND_BOTTOM);
 
         if(playfield.hasRoomFor(trash)){
             playfield.add(trash);
             spawnedThisLevel++;
-            spawnTimer = Math.max(35, 95 - 5 * level);
+            spawnTimer = spawnDelay();
         }
     }
 
+    // unlimited: starts at UNLIMITED_START_SPEED and ramps per correct sort, whatever the stage
     private double currentSpeed(){
         if(mode == GameMode.UNLIMITED){
-            return Math.min(UNLIMITED_MAX_SPEED, levelData.getSpeed() + UNLIMITED_SPEED_RAMP * correctCount);
+            return Math.min(UNLIMITED_MAX_SPEED, UNLIMITED_START_SPEED + UNLIMITED_SPEED_RAMP * correctCount);
         }
         return levelData.getSpeed();
+    }
+
+    // what can appear right now: levels read the level table, unlimited reads its own stages
+    private List<TrashKind> currentPool(){
+        return mode == GameMode.UNLIMITED ? UnlimitedData.getPool(stage) : levelData.getPool();
+    }
+
+    private List<TrashKind> currentFeatured(){
+        return mode == GameMode.UNLIMITED ? UnlimitedData.getNewKinds(stage) : levelData.getNewKinds();
+    }
+
+    private List<BinType> currentBins(){
+        return mode == GameMode.UNLIMITED ? UnlimitedData.getBins(stage) : levelData.getBins();
+    }
+
+    private String currentNewKindsText(){
+        return mode == GameMode.UNLIMITED ? UnlimitedData.getNewKindsText(stage) : levelData.getNewKindsText();
+    }
+
+    private int maxOnScreen(){
+        if(mode == GameMode.UNLIMITED){
+            return Math.min(UNLIMITED_MAX_ON_SCREEN,
+                    UNLIMITED_START_ON_SCREEN + (stage - 1) / UNLIMITED_STAGES_PER_EXTRA_PIECE);
+        }
+        return levelData.getMaxOnScreen();
+    }
+
+    private int spawnDelay(){
+        if(mode == GameMode.UNLIMITED){
+            return Math.max(UNLIMITED_SPAWN_DELAY_MIN,
+                    UNLIMITED_SPAWN_DELAY_START - UNLIMITED_SPAWN_DELAY_STEP * stage);
+        }
+        return Math.max(35, 95 - 5 * level);
     }
 
     private void checkLevelComplete(){
         if(mode != GameMode.LEVELS) return;
 
         if(spawnedThisLevel >= levelData.getQuota() && playfield.isEmpty()){
+            recordCleared(level);   // unlocks the next level (and is saved right away)
             if(level >= LevelData.TOTAL_LEVELS){
                 endRun(true);
             }else{
@@ -228,6 +334,9 @@ public class GameManager {
             case WRONG:
                 loseLife("Wrong bin! You lost a life.");
                 break;
+            case UNSPLIT:
+                loseLife("Split it first! You lost a life.");
+                break;
             case NEEDS_SPLIT:
                 setMessage("Double-click it first to split it into pieces!", false);
                 break;
@@ -240,17 +349,16 @@ public class GameManager {
     private void checkStageUp(){
         if(mode != GameMode.UNLIMITED) return;
 
-        int newStage = Math.min(LevelData.TOTAL_LEVELS, 1 + correctCount / PIECES_PER_STAGE);
-        if(newStage > level){
-            level = newStage;
-            levelData = LevelData.get(level);
-            playfield.setBins(levelData.getBins());
+        int newStage = Math.min(UnlimitedData.LAST_STAGE, 1 + correctCount / PIECES_PER_STAGE);
+        if(newStage > stage){
+            stage = newStage;
+            playfield.setBins(currentBins());
             announceNewTrash();
         }
     }
 
     private void announceNewTrash(){
-        setMessage("NEW: " + levelData.getNewKindsText() + "!", true);
+        setMessage("NEW: " + currentNewKindsText() + "!", true);
     }
 
     private void loseLife(String reason){
@@ -298,16 +406,18 @@ public class GameManager {
         enteringName = false;
     }
 
+    // restart is offered on the game-over screen (after the name is entered) and on the pause card
     public boolean canRestart(){
-        return state == GameState.PLAYING && phase == GamePhase.GAME_OVER && !enteringName;
+        if(state != GameState.PLAYING) return false;
+        return phase == GamePhase.PAUSED || (phase == GamePhase.GAME_OVER && !enteringName);
     }
 
-    // starts the same mode again from the beginning
+    // starts the same level (levels mode) or a fresh unlimited run from the beginning
     public void restart(){
         if(!canRestart()) return;
 
         if(mode == GameMode.LEVELS){
-            startLevels();
+            startLevel(level);
         }else{
             startUnlimited();
         }
@@ -335,6 +445,7 @@ public class GameManager {
     public TutorialManager getTutorial() {return tutorial;}
     public LevelData getLevelData() {return levelData;}
     public int getLevel() {return level;}
+    public int getStage() {return stage;}
     public int getScore() {return score;}
     public int getLives() {return lives;}
     public boolean isGameOver() {return phase == GamePhase.GAME_OVER;}
@@ -346,7 +457,7 @@ public class GameManager {
     public boolean isMessageGood() {return messageGood;}
 
     public String getLevelLabel(){
-        return mode == GameMode.LEVELS ? levelData.getTitle() : "UNLIMITED - STAGE " + level;
+        return mode == GameMode.LEVELS ? levelData.getTitle() : "UNLIMITED - STAGE " + stage;
     }
 
     public String getProgressText(){

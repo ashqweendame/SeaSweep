@@ -16,45 +16,47 @@ public class LevelData {
     public static final int SPECIAL_LEVEL = 11;
 
     private static final LevelData[] LEVELS = {
-        new LevelData(1, 1.2, 2, 8,
+        new LevelData(1, 1.0, 2, 8,
             new String[]{"Drag each piece of trash to the bin", "that matches its material."},
             TrashKind.PAPER_TRASH, TrashKind.PLASTIC_TRASH),
 
-        new LevelData(2, 1.5, 3, 10,
+        new LevelData(2, 1.0, 3, 10,
             new String[]{"Glass and metal bins join the shelf.", "The sea is moving faster!"},
             TrashKind.WINE_BOTTLE, TrashKind.CAN),
 
-        new LevelData(3, 1.5, 3, 10,
+        new LevelData(3, 1.0, 3, 10,
             new String[]{"This one is made of several materials.", "Double-click it to split it, then sort each piece."},
             TrashKind.COFFEE_CUP),
 
-        new LevelData(4, 1.5, 4, 12,
+        new LevelData(4, 1.1, 4, 12,
             new String[]{"Jars have more than one material.", "Double-click to split it, then sort each piece."},
             TrashKind.JAM_JAR),
 
-        new LevelData(5, 1.5, 4, 12,
+        new LevelData(5, 1.1, 4, 12,
             new String[]{"Bottle and cap: split before sorting.", "Each piece goes in its own bin."},
             TrashKind.SODA_BOTTLE),
 
-        new LevelData(6, 1.5, 4, 14,
+        new LevelData(6, 1.2, 4, 14,
             new String[]{"Notebooks hide a second material.", "Sort each piece."},
             TrashKind.SPIRAL_NOTEBOOK),
 
-        new LevelData(7, 1.5, 4, 14,
+        new LevelData(7, 1.2, 4, 14,
             new String[]{"Takeout boxes come with leftovers.", "Sort!!!"},
             TrashKind.TAKEOUT_WITH_LEFTOVER),
 
-        new LevelData(8, 1.5, 4, 14,
+        new LevelData(8, 1.3, 4, 14,
             new String[]{"Coconut drinks.", "Split first - and it's faster!"},
             TrashKind.COCONUT_DRINK),
 
-        new LevelData(9, 1.5, 4, 14,
+        new LevelData(9, 1.3, 4, 14,
             new String[]{"Face masks need careful sorting.", "Check every bin before you drop!"},
             TrashKind.FACE_MASK),
 
         new LevelData(10, 1.5, 4, 14,
             new String[]{"Old Flashlight!", "."},
-            TrashKind.OLD_FLASHLIGHT)
+            TrashKind.OLD_FLASHLIGHT),
+
+        new LevelData(11, 1.5, 4, 14, new String[]{"Special Level includes different kinds of trashes. Watch Out!"})
     };
 
     private final int number;

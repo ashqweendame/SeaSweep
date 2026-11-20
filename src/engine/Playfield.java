@@ -11,7 +11,7 @@ import java.util.List;
 // (grab, drag, drop, double-click to split). Rules such as score and lives live elsewhere.
 public class Playfield {
     public enum PressResult {NONE, GRABBED, SPLIT}
-    public enum DropResult {NONE, CORRECT, WRONG, NEEDS_SPLIT}
+    public enum DropResult {NONE, CORRECT, WRONG, NEEDS_SPLIT, UNSPLIT}
 
     private final int width;
     private final int height;
@@ -171,7 +171,11 @@ public class Playfield {
         }
 
         if(trash.isComposite()){
-            floatBackIntoBand(trash);   // must be split before it can be sorted
+            if(removeOnWrong){
+                items.remove(trash);    // dropped whole into a bin: one wrong sort, the whole piece is gone
+                return DropResult.UNSPLIT;
+            }
+            floatBackIntoBand(trash);   // tutorial lessons: must be split before it can be sorted
             return DropResult.NEEDS_SPLIT;
         }
 
@@ -187,6 +191,17 @@ public class Playfield {
             floatBackIntoBand(trash);
         }
         return DropResult.WRONG;
+    }
+
+    // used when the game is paused mid-drag: let go of the piece without sorting it
+    // (no score, no lost life) so it is not left stuck to a mouse that is no longer tracked
+    public void cancelDrag(){
+        if(dragged == null) return;
+
+        Trash trash = dragged;
+        dragged = null;
+        trash.stopDrag();
+        floatBackIntoBand(trash);
     }
 
     private void floatBackIntoBand(Trash trash){
