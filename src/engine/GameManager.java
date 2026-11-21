@@ -18,9 +18,9 @@ public class GameManager {
     // ---- unlimited mode: its own tuning, independent of the level table ----
     // Only the trash introduction order (pool, bins, "new" pieces per stage) is shared with LevelData.
     private final int PIECES_PER_STAGE = 10;                 // correct sorts before the next stage
-    private final double UNLIMITED_START_SPEED = 1.0;        // float speed at the very start
+    private final double UNLIMITED_START_SPEED = 1.2;        // float speed at the very start
     private final double UNLIMITED_SPEED_RAMP = 0.01;        // extra speed per correct sort
-    private final double UNLIMITED_MAX_SPEED = 3.0;
+    private final double UNLIMITED_MAX_SPEED = 4.0;
     private final int UNLIMITED_START_ON_SCREEN = 2;         // most pieces at once on stage 1
     private final int UNLIMITED_MAX_ON_SCREEN = 4;
     private final int UNLIMITED_STAGES_PER_EXTRA_PIECE = 3;  // one more piece allowed every N stages
