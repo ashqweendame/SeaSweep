@@ -23,6 +23,8 @@ public class Playfield {
     private double grabDy;
     private Trash lastDropped;
     private boolean removeOnWrong = true;
+    private BinType lastDropBin;                                    // the bin the last piece was dropped on
+    private final List<Trash> lastWashedAway = new ArrayList<>();   // the pieces that floated off in the last update()
 
     public Playfield(int width, int height){
         this.width = width;
@@ -74,6 +76,8 @@ public class Playfield {
     public List<Trash> getItems() {return new ArrayList<>(items);}
     public Trash getDragged() {return dragged;}
     public Trash getLastDropped() {return lastDropped;}
+    public BinType getLastDropBin() {return lastDropBin;}
+    public List<Trash> getWashedAway() {return new ArrayList<>(lastWashedAway);}
     public void setRemoveOnWrong(boolean removeOnWrong) {this.removeOnWrong = removeOnWrong;}
 
     public void clear(){
@@ -97,6 +101,7 @@ public class Playfield {
     // one tick: everything floats on. Returns how many pieces washed off the far side.
     public int update(){
         int washedAway = 0;
+        lastWashedAway.clear();
         Iterator<Trash> it = items.iterator();
         while(it.hasNext()){
             Trash trash = it.next();
@@ -105,6 +110,7 @@ public class Playfield {
             trash.drift();
             if(trash.hasWashedAway(width)){
                 it.remove();
+                lastWashedAway.add(trash);
                 washedAway++;
             }
         }
@@ -163,6 +169,7 @@ public class Playfield {
         dragged = null;
         trash.stopDrag();
         lastDropped = null;
+        lastDropBin = null;
 
         BinSlot slot = slotAt(trash.getX(), trash.getY());
         if(slot == null){
@@ -172,6 +179,8 @@ public class Playfield {
 
         if(trash.isComposite()){
             if(removeOnWrong){
+                lastDropped = trash;
+                lastDropBin = slot.getType();
                 items.remove(trash);    // dropped whole into a bin: one wrong sort, the whole piece is gone
                 return DropResult.UNSPLIT;
             }
@@ -180,6 +189,7 @@ public class Playfield {
         }
 
         lastDropped = trash;
+        lastDropBin = slot.getType();
         if(slot.getType() == trash.getBin()){
             items.remove(trash);
             return DropResult.CORRECT;

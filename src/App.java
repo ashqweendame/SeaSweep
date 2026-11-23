@@ -116,6 +116,9 @@ public class App extends Application {
                 case GAME_OVER:
                     manager.returnToMenu();
                     break;
+                case RECAP:
+                    manager.advanceRecap();   // skip the animation, or continue once it has finished
+                    break;
                 default:
                     manager.exitRun();   // intro / level-complete card: nothing at stake, just leave
                     break;
@@ -132,6 +135,11 @@ public class App extends Application {
             case LEVEL_COMPLETE:
                 if (code == KeyCode.ENTER) {
                     manager.nextLevel();
+                }
+                break;
+            case RECAP:
+                if (code == KeyCode.ENTER) {
+                    manager.advanceRecap();
                 }
                 break;
             case PAUSED:
@@ -198,6 +206,13 @@ public class App extends Application {
                             manager.restart();
                         } else if (panel.isPauseMenuHit(x, y)) {
                             manager.returnToMenu();
+                        }
+                        break;
+                    case RECAP:
+                        if (!manager.isRecapDone()) {
+                            manager.skipRecap();
+                        } else if (panel.isRecapContinueHit(x, y)) {
+                            manager.continueRecap();
                         }
                         break;
                     case INTRO:

@@ -6,13 +6,16 @@ import engine.GameManager;
 import engine.GameMode;
 import engine.GamePhase;
 import engine.LevelData;
+import engine.EcoFacts;
 import engine.Playfield;
+import engine.RunStats;
 import engine.TutorialManager;
 import model.BinType;
 import model.ScoreEntry;
 import model.Trash;
 import model.TrashKind;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import javafx.scene.canvas.Canvas;
@@ -57,6 +60,9 @@ public class GamePanel extends Canvas {
     private final int[] BTN_PAUSE_RESTART = {centerX - 100, 331, 200, 44};
     private final int[] BTN_PAUSE_MENU = {centerX - 100, 387, 200, 44};
 
+    // the recap screen's button (it only appears once the animation has finished)
+    private final int[] BTN_RECAP_CONTINUE = {centerX - 100, 627, 200, 38};
+
     // level-select grid: levels 1-10 in 5 columns x 2 rows, the special level as one wide cell below
     private final int GRID_COLS = 5;
     private final int CELL_W = 130;
@@ -86,6 +92,10 @@ public class GamePanel extends Canvas {
     private final Font fontBOLD = Font.font("Arial", FontWeight.BOLD, 16);
 
     private final Assets assets = new Assets(); // your drawn pictures (optional, per item)
+
+    // the recap's lesson is word-wrapped once, not every frame
+    private String lessonCacheText = "";
+    private List<String> lessonCacheLines = new ArrayList<>();
 
     public GamePanel(GameManager gameManager) {
         super(WIDTH, HEIGHT);
@@ -303,9 +313,10 @@ public class GamePanel extends Canvas {
         GamePhase phase = gameManager.getPhase();
         boolean over = phase == GamePhase.GAME_OVER;
         boolean paused = phase == GamePhase.PAUSED;
+        boolean recap = phase == GamePhase.RECAP;
 
         drawBackground(gc);
-        drawPlayfield(gc, field, !over && !paused);   // game over / pause: the bins stay, the trash is hidden
+        drawPlayfield(gc, field, !over && !paused && !recap);   // game over / pause / recap: the bins stay, the trash is hidden
 
         if (over) {
             drawGameOverScreen(gc);        // dims the scene first, so the HUD below stays bright
@@ -323,6 +334,8 @@ public class GamePanel extends Canvas {
             drawLevelComplete(gc);
         } else if (paused) {
             drawPausedCard(gc);
+        } else if (recap) {
+            drawRecap(gc);
         }
     }
 
@@ -524,6 +537,269 @@ public class GamePanel extends Canvas {
                 Font.font("Arial", FontWeight.NORMAL, 13), centerX, 450);
     }
 
+    // ================= recap: what you sorted, what went wrong, what to remember =================
+
+    private void drawRecap(GraphicsContext gc) {
+        RunStats stats = gameManager.getStats();
+        int t = gameManager.getRecapTicks();
+
+        gc.setFill(Color.rgb(0, 0, 0, 110 / 255.0));
+        gc.fillRect(0, 0, width, height);
+        gc.setFill(COLOR_SCORE);
+        gc.fillRoundRect(50, 25, 800, 650, 28, 28);
+
+        gc.setFill(Color.YELLOW);
+        drawCentered(gc, gameManager.getRecapTitle(), bold(34), centerX, 75);
+
+        gc.setFill(Color.WHITE);
+        drawCentered(gc, "Score " + gameManager.getScore()
+                + "   |   Sorted " + stats.getSortedCount()
+                + "   |   Missed " + stats.getMissedCount()
+                + "   |   Wrong " + stats.getWrongCount(), bold(16), centerX, 105);
+
+        gc.setFill(Color.YELLOW);
+        drawCentered(gc, "WHAT YOU SORTED", bold(15), centerX, 140);
+        drawRecapBins(gc, stats, t);
+
+        gc.setFill(Color.YELLOW);
+        drawCentered(gc, "WHAT WENT WRONG", bold(15), centerX, 332);
+        drawRecapMistakes(gc, stats, t);
+
+        drawRecapLesson(gc, stats, t);
+
+        if (gameManager.isRecapDone()) {
+            drawButton(gc, BTN_RECAP_CONTINUE, COLOR_GLASS, "CONTINUE", bold(18), Color.WHITE, false);
+        } else {
+            gc.setFill(Color.WHITE);
+            drawCentered(gc, "Click or press ENTER to skip",
+                    Font.font("Arial", FontWeight.NORMAL, 13), centerX, 650);
+        }
+    }
+
+    // one tile per bin: sorted pieces fly in one after another and the counts tick up as they land
+    private void drawRecapBins(GraphicsContext gc, RunStats stats, int t) {
+        List<BinType> bins = gameManager.getRecapBins();
+        int n = bins.size();
+        if (n == 0) return;
+
+        int gap = 10;
+        int tileW = Math.min(110, (760 - gap * (n - 1)) / n);
+        int tileH = 150;
+        int tileY = 152;
+        int startX = centerX - (n * tileW + (n - 1) * gap) / 2;
+
+        List<RunStats.SortEvent> events = stats.getSorted();
+        int[] counts = new int[n];
+        double[] pulse = new double[n];
+        List<List<TrashKind>> kinds = new ArrayList<>();
+        for (int b = 0; b < n; b++) {
+            kinds.add(new ArrayList<>());
+        }
+
+        // what has landed so far
+        for (int i = 0; i < events.size(); i++) {
+            int land = stats.getLandTick(i);
+            if (land > t) continue;
+
+            int b = bins.indexOf(events.get(i).getBin());
+            if (b < 0) continue;
+
+            counts[b]++;
+            TrashKind kind = events.get(i).getKind();
+            if (!kinds.get(b).contains(kind)) {
+                kinds.get(b).add(kind);
+            }
+            int since = t - land;
+            if (since < 8) {
+                pulse[b] = Math.max(pulse[b], 1 - since / 8.0);   // a quick flash when something lands
+            }
+        }
+
+        for (int b = 0; b < n; b++) {
+            int x = startX + b * (tileW + gap);
+            double cx = x + tileW / 2.0;
+
+            gc.setFill(COLOR_SHADE);
+            gc.fillRoundRect(x + 3, tileY + 5, tileW, tileH, 16, 16);
+            gc.setFill(getBinColor(bins.get(b)));
+            gc.fillRoundRect(x, tileY, tileW, tileH, 16, 16);
+            if (pulse[b] > 0) {
+                gc.setFill(Color.rgb(255, 255, 255, 0.4 * pulse[b]));
+                gc.fillRoundRect(x, tileY, tileW, tileH, 16, 16);
+            }
+
+            // name plate
+            String label = bins.get(b).getLabel();
+            Font labelFont = bold(12);
+            int plateW = textWidth(label, labelFont) + 14;
+            gc.setFill(COLOR_SCORE);
+            gc.fillRoundRect(cx - plateW / 2.0, tileY + 8, plateW, 20, 10, 10);
+            gc.setFill(Color.WHITE);
+            drawCentered(gc, label, labelFont, cx, tileY + 22);
+
+            // count
+            gc.setFill(Color.WHITE);
+            gc.fillRoundRect(cx - 30, tileY + 40, 60, 46, 14, 14);
+            gc.setFill(COLOR_SCORE);
+            drawCentered(gc, String.valueOf(counts[b]), bold(34), cx, tileY + 76);
+
+            // which kinds ended up in this bin
+            List<TrashKind> shown = kinds.get(b);
+            int icons = Math.min(3, shown.size());
+            for (int j = 0; j < icons; j++) {
+                drawKindSprite(gc, shown.get(j), cx + (j - (icons - 1) / 2.0) * 34, tileY + 112, 30);
+            }
+            if (shown.size() > 3) {
+                gc.setFill(Color.WHITE);
+                gc.fillRoundRect(cx - 14, tileY + 132, 28, 14, 7, 7);
+                gc.setFill(COLOR_SCORE);
+                drawCentered(gc, "+" + (shown.size() - 3), bold(11), cx, tileY + 143);
+            }
+        }
+
+        // the pieces that are in the air right now
+        for (int i = 0; i < events.size(); i++) {
+            int launch = stats.getLaunchTick(i);
+            int land = stats.getLandTick(i);
+            if (t < launch || t >= land) continue;
+
+            int b = bins.indexOf(events.get(i).getBin());
+            if (b < 0) continue;
+
+            double p = (t - launch) / (double) RunStats.FLIGHT_TICKS;
+            double eased = 1 - (1 - p) * (1 - p);
+            double cx = startX + b * (tileW + gap) + tileW / 2.0;
+            double cy = (tileY - 35) + eased * 120;
+            double size = 48 - eased * 22;
+            drawKindSprite(gc, events.get(i).getKind(), cx, cy, size);
+        }
+    }
+
+    // one row per kind of mistake, sliding in one after another
+    private void drawRecapMistakes(GraphicsContext gc, RunStats stats, int t) {
+        List<RunStats.Mistake> mistakes = stats.getMistakes();
+
+        if (mistakes.isEmpty()) {
+            gc.setGlobalAlpha(recapFade(t, stats.getMistakeTick(0)));
+            gc.setFill(COLOR_GOOD);
+            drawCentered(gc, "No mistakes - perfect sorting!", bold(20), centerX, 395);
+            gc.setGlobalAlpha(1.0);
+            return;
+        }
+
+        Font textFont = Font.font("Arial", FontWeight.NORMAL, 14);
+        int rows = stats.getMistakeRows();
+        for (int row = 0; row < rows; row++) {
+            double a = recapFade(t, stats.getMistakeTick(row));
+            if (a <= 0) continue;
+
+            RunStats.Mistake m = mistakes.get(row);
+            double x = 80 + (1 - a) * 40;   // slides in from the right
+            double y = 346 + row * 40;
+
+            gc.setGlobalAlpha(a);
+            gc.setFill(Color.rgb(255, 255, 255, 0.12));
+            gc.fillRoundRect(x, y, 740, 34, 10, 10);
+
+            drawKindSprite(gc, m.getKind(), x + 22, y + 17, 28);
+
+            gc.setFill(Color.WHITE);
+            gc.setFont(textFont);
+            gc.fillText(EcoFacts.describe(m), x + 44, y + 22);
+
+            String tag;
+            Color tagColor;
+            Color tagText = Color.WHITE;
+            switch (m.getType()) {
+                case MISSED:
+                    tag = "MISSED";
+                    tagColor = COLOR_MISS;
+                    break;
+                case WRONG_BIN:
+                    tag = "WRONG BIN";
+                    tagColor = COLOR_TIN;
+                    break;
+                default:
+                    tag = "NOT SPLIT";
+                    tagColor = COLOR_PAPER;
+                    tagText = COLOR_SCORE;
+                    break;
+            }
+            int tagW = 84;
+            double tagX = x + 740 - tagW - 8;
+            gc.setFill(tagColor);
+            gc.fillRoundRect(tagX, y + 7, tagW, 20, 10, 10);
+            gc.setFill(tagText);
+            drawCentered(gc, tag, bold(11), tagX + tagW / 2.0, y + 21);
+            gc.setGlobalAlpha(1.0);
+        }
+
+        if (mistakes.size() > rows) {
+            double a = recapFade(t, stats.getMistakeTick(Math.max(0, rows - 1)) + 10);
+            gc.setGlobalAlpha(a);
+            gc.setFill(Color.WHITE);
+            drawCentered(gc, "+ " + (mistakes.size() - rows) + " more kinds of mistakes",
+                    Font.font("Arial", FontWeight.NORMAL, 13), centerX, 346 + rows * 40 + 12);
+            gc.setGlobalAlpha(1.0);
+        }
+    }
+
+    // the "did you know?" box: explains the most common mistake, or teaches a fact after a clean run
+    private void drawRecapLesson(GraphicsContext gc, RunStats stats, int t) {
+        double a = recapFade(t, stats.getLessonTick());
+        if (a <= 0) return;
+
+        gc.setGlobalAlpha(a);
+        gc.setFill(Color.rgb(255, 255, 255, 0.12));
+        gc.fillRoundRect(80, 495, 740, 120, 16, 16);
+
+        gc.setFill(Color.YELLOW);
+        gc.setFont(bold(14));
+        gc.fillText("DID YOU KNOW?", 100, 520);
+
+        Font font = Font.font("Arial", FontWeight.NORMAL, 15);
+        List<String> lines = lessonLines(gameManager.getRecapLesson(), font);
+        gc.setFill(Color.WHITE);
+        gc.setFont(font);
+        for (int i = 0; i < Math.min(3, lines.size()); i++) {
+            gc.fillText(lines.get(i), 100, 545 + i * 23);
+        }
+        gc.setGlobalAlpha(1.0);
+    }
+
+    // 0 before `start`, 1 once the fade is done
+    private double recapFade(int t, int start) {
+        return Math.max(0, Math.min(1, (t - start) / (double) RunStats.ROW_FADE_TICKS));
+    }
+
+    private List<String> lessonLines(String text, Font font) {
+        if (!text.equals(lessonCacheText)) {
+            lessonCacheText = text;
+            lessonCacheLines = wrapText(text, font, 700);
+        }
+        return lessonCacheLines;
+    }
+
+    // splits text into lines no wider than maxWidth
+    private List<String> wrapText(String text, Font font, int maxWidth) {
+        List<String> lines = new ArrayList<>();
+        StringBuilder line = new StringBuilder();
+
+        for (String word : text.split(" ")) {
+            String candidate = line.length() == 0 ? word : line + " " + word;
+            if (line.length() > 0 && textWidth(candidate, font) > maxWidth) {
+                lines.add(line.toString());
+                line = new StringBuilder(word);
+            } else {
+                line = new StringBuilder(candidate);
+            }
+        }
+        if (line.length() > 0) {
+            lines.add(line.toString());
+        }
+        return lines;
+    }
+
     // ================= game over =================
 
     private void drawGameOverScreen(GraphicsContext gc) {
@@ -628,6 +904,7 @@ public class GamePanel extends Canvas {
     public boolean isPauseResumeHit(double x, double y) {return hit(BTN_PAUSE_RESUME, x, y);}
     public boolean isPauseRestartHit(double x, double y) {return hit(BTN_PAUSE_RESTART, x, y);}
     public boolean isPauseMenuHit(double x, double y) {return hit(BTN_PAUSE_MENU, x, y);}
+    public boolean isRecapContinueHit(double x, double y) {return hit(BTN_RECAP_CONTINUE, x, y);}
 
     // the tutorial's NEXT / PLAY LEVELS button only exists on some steps
     public boolean isTutorialNextHit(double x, double y) {

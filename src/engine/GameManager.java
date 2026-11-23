@@ -52,6 +52,11 @@ public class GameManager {
     private int spawnedThisLevel = 0;
     private int spawnTimer = 0;
 
+    private RunStats stats = new RunStats();   // what happened this level (or this whole unlimited run)
+    private int recapTicks = 0;                // how far the recap animation has got
+    private boolean recapEndsRun = false;      // true: the game-over screen follows the recap
+    private String recapLesson = "";           // the text in the "did you know?" box
+
     private boolean victory = false;
     private boolean enteringName = false;
     private final StringBuilder nameInput = new StringBuilder();
@@ -162,6 +167,7 @@ public class GameManager {
         nameInput.setLength(0);
         topScores = new ArrayList<>();
         clearMessage();
+        stats = new RunStats();
 
         playfield.clear();
         playfield.setBins(currentBins());
@@ -204,6 +210,10 @@ public class GameManager {
             tutorial.update();
             return;
         }
+        if(state == GameState.PLAYING && phase == GamePhase.RECAP){
+            recapTicks++;
+            return;
+        }
         // INTRO, PAUSED, LEVEL_COMPLETE and GAME_OVER all stop here, so a pause freezes everything
         if(state != GameState.PLAYING || phase != GamePhase.RUNNING) return;
 
@@ -212,6 +222,9 @@ public class GameManager {
         }
 
         int washedAway = playfield.update();
+        for(Trash missed : playfield.getWashedAway()){
+            stats.recordMissed(missed.getKind());
+        }
         for(int i = 0; i < washedAway && phase == GamePhase.RUNNING; i++){
             loseLife("Washed away! You lost a life.");
         }
@@ -293,7 +306,7 @@ public class GameManager {
             if(level >= LevelData.TOTAL_LEVELS){
                 endRun(true);
             }else{
-                phase = GamePhase.LEVEL_COMPLETE;
+                beginRecap(false);
             }
         }
     }
@@ -325,16 +338,28 @@ public class GameManager {
     }
 
     private void handleDrop(Playfield.DropResult result){
+        Trash dropped = playfield.getLastDropped();
+        BinType droppedBin = playfield.getLastDropBin();
+
         switch(result){
             case CORRECT:
+                if(dropped != null){
+                    stats.recordSorted(dropped.getKind(), droppedBin);
+                }
                 score += POINTS_PER_PIECE;
                 correctCount++;
                 checkStageUp();
                 break;
             case WRONG:
+                if(dropped != null){
+                    stats.recordWrong(dropped.getKind(), droppedBin);
+                }
                 loseLife("Wrong bin! You lost a life.");
                 break;
             case UNSPLIT:
+                if(dropped != null){
+                    stats.recordNotSplit(dropped.getKind());
+                }
                 loseLife("Split it first! You lost a life.");
                 break;
             case NEEDS_SPLIT:
@@ -371,9 +396,54 @@ public class GameManager {
 
     private void endRun(boolean won){
         victory = won;
-        phase = GamePhase.GAME_OVER;
-        enteringName = true;
-        nameInput.setLength(0);
+        beginRecap(true);
+    }
+
+    // ================= recap =================
+
+    // after a level or a game over: an animation of what was sorted, what went wrong, and a lesson
+    private void beginRecap(boolean endsRun){
+        phase = GamePhase.RECAP;
+        recapTicks = 0;
+        recapEndsRun = endsRun;
+        enteringName = false;   // the name prompt only opens once the recap is dismissed
+        recapLesson = stats.getMistakes().isEmpty()
+                ? EcoFacts.praiseFor(stats)
+                : EcoFacts.lessonFor(stats.getTopMistake());
+    }
+
+    public boolean isRecapDone(){
+        return phase == GamePhase.RECAP && recapTicks >= stats.getTotalTicks();
+    }
+
+    // first click / ENTER: jump to the end of the animation
+    public void skipRecap(){
+        if(state == GameState.PLAYING && phase == GamePhase.RECAP
+                && recapTicks >= RunStats.INPUT_DELAY && !isRecapDone()){
+            recapTicks = stats.getTotalTicks();
+        }
+    }
+
+    // once the animation is finished: on to the level-complete card or the game-over screen
+    public void continueRecap(){
+        if(state == GameState.PLAYING && isRecapDone() && recapTicks >= RunStats.INPUT_DELAY){
+            if(recapEndsRun){
+                phase = GamePhase.GAME_OVER;
+                enteringName = true;
+                nameInput.setLength(0);
+            }else{
+                phase = GamePhase.LEVEL_COMPLETE;
+            }
+        }
+    }
+
+    // ENTER / ESC: skip the animation, or continue if it has already finished
+    public void advanceRecap(){
+        if(isRecapDone()){
+            continueRecap();
+        }else{
+            skipRecap();
+        }
     }
 
     // ================= name entry and leaderboard =================
@@ -455,6 +525,19 @@ public class GameManager {
     public List<ScoreEntry> getTopScores() {return new ArrayList<>(topScores);}
     public String getMessage() {return messageTicks > 0 ? message : "";}
     public boolean isMessageGood() {return messageGood;}
+
+    // the recap screen
+    public RunStats getStats() {return stats;}
+    public int getRecapTicks() {return recapTicks;}
+    public String getRecapLesson() {return recapLesson;}
+    public List<BinType> getRecapBins() {return currentBins();}
+
+    public String getRecapTitle(){
+        if(recapEndsRun){
+            return victory ? "YOU WIN!" : "GAME OVER";
+        }
+        return levelData.getTitle() + " COMPLETE!";
+    }
 
     public String getLevelLabel(){
         return mode == GameMode.LEVELS ? levelData.getTitle() : "UNLIMITED - STAGE " + stage;
